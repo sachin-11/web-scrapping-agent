@@ -1,5 +1,10 @@
 import os
 import logging
+import hashlib
+import time
+import json
+import shutil
+import re
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, HttpUrl
@@ -34,13 +39,45 @@ class ScrapeResponse(BaseModel):
 @router.post("/scrape", response_model=ScrapeResponse)
 async def scrape_endpoint(request: ScrapeRequest):
     """
-    Orchestrator endpoint to crawl page, extract structured data via LLM,
-    optionally download & resize images, generate Excel sheet, and return previews.
+    Orchestrator endpoint with a 1-hour TTL Cache Layer to avoid redundant crawling and OpenAI costs.
+    Crawls, extracts, processes, compiles Excel, and responds with preview records.
     """
     logger.info(f"Received scrape request for URL: {request.url}")
     
+    # Generate unique MD5 hash for the request details
+    cache_param_str = f"{request.url}_{request.instruction}_{request.max_pages}_{request.download_images}"
+    hash_key = hashlib.md5(cache_param_str.encode('utf-8')).hexdigest()
+    cache_id = f"cache_{hash_key}"
+    
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    json_cache_path = os.path.join(backend_dir, "outputs", f"{cache_id}.json")
+    excel_cache_path = os.path.join(backend_dir, "outputs", f"{cache_id}.xlsx")
+    
+    TTL_SECONDS = 3600 # 1 hour TTL
+    
+    # 1. TTL Cache Lookup
+    if os.path.exists(json_cache_path) and os.path.exists(excel_cache_path):
+        mtime = os.path.getmtime(json_cache_path)
+        if time.time() - mtime < TTL_SECONDS:
+            logger.info(f"Cache HIT for key: {hash_key}. Loading results instantaneously from disk...")
+            try:
+                with open(json_cache_path, "r", encoding="utf-8") as f:
+                    cached_data = json.load(f)
+                
+                # Copy back to default result.xlsx for standard legacy links
+                shutil.copy2(excel_cache_path, os.path.join(backend_dir, "outputs", "result.xlsx"))
+                
+                return ScrapeResponse(
+                    success=True,
+                    excel_url=cached_data["excel_url"],
+                    total_records=cached_data["total_records"],
+                    preview_data=cached_data["preview_data"]
+                )
+            except Exception as ce:
+                logger.warning(f"Cache read failure: {ce}. Falling back to default crawl flow.")
+
     try:
-        # 1. Scraping using Playwright
+        # 2. Scraping using Playwright
         pages = await scrape_multiple_pages(request.url, max_pages=request.max_pages)
         
         # Check if scraping succeeded
@@ -49,7 +86,7 @@ async def scrape_endpoint(request: ScrapeRequest):
             errors = "; ".join([p["error"] for p in pages if p["error"]]) or "Unknown crawling error"
             raise HTTPException(status_code=400, detail=f"Failed to crawl target pages: {errors}")
             
-        # 2. Extract structured data from pages via LLM
+        # 3. Extract structured data from pages via LLM
         all_records = []
         for page in successful_pages:
             logger.info(f"Extracting structured data from Page {page['page_number']}")
@@ -73,11 +110,10 @@ async def scrape_endpoint(request: ScrapeRequest):
         if not all_records:
             raise HTTPException(status_code=422, detail="LLM data extraction returned empty records. Try updating your instruction.")
 
-        # 3. Optional Image Downloading & Processing
+        # 4. Optional Image Downloading & Processing
         image_paths_map = {}
         if request.download_images:
             logger.info("Initializing image downloading for extracted records...")
-            backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             output_folder = os.path.join(backend_dir, "outputs", "images")
             
             for idx, record in enumerate(all_records):
@@ -105,20 +141,33 @@ async def scrape_endpoint(request: ScrapeRequest):
                         # Update record with relative image path for sheet clarity
                         record["local_image_path"] = os.path.relpath(saved[0], backend_dir).replace("\\", "/")
 
-        # 4. Generate Styled Excel Spreadsheet
-        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        excel_output_path = os.path.join(backend_dir, "outputs", "result.xlsx")
-        
+        # 5. Generate Styled Excel Spreadsheet
         logger.info("Generating formatted Excel spreadsheet...")
-        create_excel(all_records, image_paths_map, excel_output_path)
+        create_excel(all_records, image_paths_map, excel_cache_path)
         
-        # 5. Build Response
-        # Return first 5 rows as a preview
+        # Duplicate to default result.xlsx path
+        shutil.copy2(excel_cache_path, os.path.join(backend_dir, "outputs", "result.xlsx"))
+        
+        # 6. Save successful responses to Cache
         preview_data = all_records[:5]
+        excel_url = f"/api/download-excel?id={cache_id}"
+        
+        response_data = {
+            "excel_url": excel_url,
+            "total_records": len(all_records),
+            "preview_data": preview_data
+        }
+        
+        try:
+            with open(json_cache_path, "w", encoding="utf-8") as f:
+                json.dump(response_data, f, ensure_ascii=False, indent=2)
+            logger.info(f"Cached successful scrape results under ID: {cache_id}")
+        except Exception as ce:
+            logger.warning(f"Failed to save results to cache: {ce}")
         
         return ScrapeResponse(
             success=True,
-            excel_url="/api/download-excel",
+            excel_url=excel_url,
             total_records=len(all_records),
             preview_data=preview_data
         )
@@ -136,12 +185,17 @@ async def scrape_endpoint(request: ScrapeRequest):
         )
 
 @router.get("/download-excel")
-def download_excel_endpoint():
+def download_excel_endpoint(id: Optional[str] = None):
     """
-    Returns the generated Excel file as a download response.
+    Returns the generated Excel file as a download response. Supports dynamic caching IDs.
     """
     backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    excel_path = os.path.join(backend_dir, "outputs", "result.xlsx")
+    
+    # Prevent path traversal vulnerabilities by enforcing alphanumeric key matching
+    if id and re.match(r"^[a-zA-Z0-9_-]+$", id):
+        excel_path = os.path.join(backend_dir, "outputs", f"{id}.xlsx")
+    else:
+        excel_path = os.path.join(backend_dir, "outputs", "result.xlsx")
     
     if not os.path.exists(excel_path):
         raise HTTPException(status_code=404, detail="Excel spreadsheet has not been generated yet. Run a scrape job first.")

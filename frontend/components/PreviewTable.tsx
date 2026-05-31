@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import Image from "next/image";
 
 interface PreviewTableProps {
   data: any[]; // First 5 rows of data
@@ -64,14 +64,14 @@ export default function PreviewTable({ data }: PreviewTableProps) {
                     <td className="py-3 px-4 align-middle text-center">
                       {imgLoc ? (
                         <div className="relative w-12 h-12 rounded-lg overflow-hidden border border-zinc-800 bg-zinc-950 inline-block">
-                          <img
+                          <Image
                             src={imgLoc}
                             alt="Product preview"
-                            className="object-cover w-full h-full"
-                            onError={(e) => {
-                              // Fallback on broken image
-                              (e.target as HTMLElement).style.display = 'none';
-                            }}
+                            fill
+                            sizes="48px"
+                            className="object-cover"
+                            loading="lazy"
+                            unoptimized={true} // Bypasses optimization constraints for dynamic user scrapers while keeping loading & styling features intact
                           />
                         </div>
                       ) : (
