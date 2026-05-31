@@ -1,0 +1,40 @@
+# Environment keys (CRITICAL - DO NOT PUSH API KEYS)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+backend/.env
+backend/.env.*
+
+# Python Cache & Virtual Environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Node (Frontend) dependencies & builds
+node_modules/
+/frontend/node_modules/
+.next/
+/frontend/.next/
+out/
+build/
+dist/
+
+# Outputs / Local Scraped Data
+backend/outputs/
+/backend/outputs/
+*.xlsx
+*.csv
+*.log
+
+# OS Metadata
+.DS_Store
+Thumbs.db
