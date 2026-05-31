@@ -9,7 +9,8 @@ interface DownloadButtonProps {
 export default function DownloadButton({ totalRecords }: DownloadButtonProps) {
   const handleDownload = () => {
     // Navigate straight to download route on backend
-    window.open("http://localhost:8000/api/download-excel", "_blank");
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
+    window.open(`${apiBase}/api/download-excel`, "_blank");
   };
 
   return (

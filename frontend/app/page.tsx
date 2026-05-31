@@ -48,7 +48,8 @@ export default function Home() {
     const progressTimer1 = setTimeout(() => setCurrentStep(2), 2000); // Transition to Crawling after 2s
     
     try {
-      const response = await fetch("http://localhost:8000/api/scrape", {
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
+      const response = await fetch(`${apiBase}/api/scrape`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

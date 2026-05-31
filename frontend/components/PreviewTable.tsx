@@ -50,8 +50,9 @@ export default function PreviewTable({ data }: PreviewTableProps) {
           <tbody className="divide-y divide-zinc-800/60">
             {data.map((row, rIdx) => {
               // Extract local image or web image
+              const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
               const imgLoc = row.local_image_path 
-                ? `http://localhost:8000/${row.local_image_path}`
+                ? `${apiBase}/${row.local_image_path}`
                 : (row.image || row.image_url || row.img || row.src);
 
               return (
