@@ -3,10 +3,10 @@
 import React from "react";
 
 interface PreviewTableProps {
-  data: list<dict>; // First 5 rows of data
+  data: any[]; // First 5 rows of data
 }
 
-export default function PreviewTable({ data }: { data: any[] }) {
+export default function PreviewTable({ data }: PreviewTableProps) {
   if (!data || data.length === 0) return null;
 
   // Dynamically discover columns from data keys
