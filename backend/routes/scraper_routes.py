@@ -5,7 +5,7 @@ import time
 import json
 import shutil
 import re
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, HttpUrl
 from typing import Optional, List, Dict
@@ -37,11 +37,17 @@ class ScrapeResponse(BaseModel):
     error: Optional[str] = None
 
 @router.post("/scrape", response_model=ScrapeResponse)
-async def scrape_endpoint(request: ScrapeRequest):
+async def scrape_endpoint(request: ScrapeRequest, x_scraper_password: Optional[str] = Header(None)):
     """
     Orchestrator endpoint with a 1-hour TTL Cache Layer to avoid redundant crawling and OpenAI costs.
     Crawls, extracts, processes, compiles Excel, and responds with preview records.
     """
+    # Enforce password authentication if SCRAPER_PASSWORD is configured in the environment
+    expected_password = os.getenv("SCRAPER_PASSWORD")
+    if expected_password and x_scraper_password != expected_password:
+        logger.warning("Unauthorized scrape attempt blocked: invalid or missing SCRAPER_PASSWORD header.")
+        raise HTTPException(status_code=401, detail="Unauthorized: Incorrect or missing scraper password.")
+
     logger.info(f"Received scrape request for URL: {request.url}")
     
     # Generate unique MD5 hash for the request details
@@ -216,3 +222,16 @@ def status_endpoint():
         "health": "healthy",
         "version": "1.0.0"
     }
+
+class VerifyPasswordRequest(BaseModel):
+    password: str
+
+@router.post("/verify-password")
+def verify_password_endpoint(request: VerifyPasswordRequest):
+    """
+    Validates the password input directly to ensure it matches SCRAPER_PASSWORD.
+    """
+    expected_password = os.getenv("SCRAPER_PASSWORD")
+    if not expected_password:
+        return {"valid": True}
+    return {"valid": request.password == expected_password}

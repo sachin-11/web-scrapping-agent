@@ -15,6 +15,22 @@ export default function Home() {
   const [totalRecords, setTotalRecords] = useState(0);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
 
+  const [password, setPassword] = useState("");
+  const [isUnlocked, setIsUnlocked] = useState(false);
+  const [passwordInput, setPasswordInput] = useState("");
+  const [authError, setAuthError] = useState(false);
+  const [authErrorMsg, setAuthErrorMsg] = useState("");
+  const [isVerifying, setIsVerifying] = useState(false);
+
+  // Check LocalStorage on component mount to keep user authenticated
+  useEffect(() => {
+    const savedPassword = localStorage.getItem("scraper_password") || "";
+    if (savedPassword) {
+      setPassword(savedPassword);
+      setIsUnlocked(true);
+    }
+  }, []);
+
   // Auto-dismiss toasts after 5 seconds
   useEffect(() => {
     if (toast) {
@@ -53,6 +69,7 @@ export default function Home() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "X-Scraper-Password": password,
         },
         body: JSON.stringify(formData),
       });
@@ -61,6 +78,13 @@ export default function Home() {
       clearTimeout(progressTimer1);
 
       if (!response.ok) {
+        if (response.status === 401) {
+          localStorage.removeItem("scraper_password");
+          setIsUnlocked(false);
+          setPassword("");
+          setPasswordInput("");
+          throw new Error("Unauthorized: Invalid Scraper Password entered!");
+        }
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.detail || `Server error (Status: ${response.status})`);
       }
@@ -97,6 +121,90 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center justify-between relative overflow-hidden font-sans">
+      
+      {/* 🔐 Full-screen Glassmorphic Authentication Overlay */}
+      {!isUnlocked && (
+        <div className="fixed inset-0 z-[100] backdrop-blur-2xl bg-zinc-950/90 flex items-center justify-center p-4">
+          <div className="max-w-md w-full border border-zinc-800/80 bg-zinc-900/60 rounded-3xl p-8 shadow-2xl space-y-6 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-indigo-500 to-fuchsia-500 mx-auto flex items-center justify-center text-3xl shadow-xl shadow-indigo-500/20">
+              🔑
+            </div>
+            
+            <div className="space-y-2">
+              <h2 className="text-2xl font-extrabold text-white">Unlock Scraper Agent</h2>
+              <p className="text-xs text-zinc-500 leading-relaxed">
+                Please enter the secure scraper password. This blocks unauthorized crawling requests and protects your API keys.
+              </p>
+            </div>
+            
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              setAuthError(false);
+              setAuthErrorMsg("");
+              
+              if (!passwordInput.trim()) {
+                setAuthError(true);
+                return;
+              }
+
+              setIsVerifying(true);
+              try {
+                const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
+                const response = await fetch(`${apiBase}/api/verify-password`, {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json"
+                  },
+                  body: JSON.stringify({ password: passwordInput })
+                });
+
+                if (!response.ok) {
+                  throw new Error("Unable to contact backend security gateway.");
+                }
+
+                const result = await response.json();
+                if (result.valid) {
+                  localStorage.setItem("scraper_password", passwordInput);
+                  setPassword(passwordInput);
+                  setIsUnlocked(true);
+                } else {
+                  setAuthErrorMsg("Access Denied: Incorrect Password entered!");
+                }
+              } catch (err: any) {
+                setAuthErrorMsg(err.message || "Network validation error. Check server status.");
+              } finally {
+                setIsVerifying(false);
+              }
+            }} className="space-y-4">
+              <div>
+                <input
+                  type="password"
+                  placeholder="Enter access password..."
+                  value={passwordInput}
+                  disabled={isVerifying}
+                  onChange={(e) => setPasswordInput(e.target.value)}
+                  className="w-full bg-zinc-950/80 border border-zinc-800 focus:border-indigo-500 rounded-xl px-4 py-3 text-sm text-center tracking-widest text-white outline-none transition duration-150"
+                  required
+                />
+                {authError && (
+                  <p className="text-[10px] text-rose-400 mt-1.5 font-semibold">Password cannot be empty.</p>
+                )}
+                {authErrorMsg && (
+                  <p className="text-[10px] text-rose-400 mt-1.5 font-semibold">{authErrorMsg}</p>
+                )}
+              </div>
+              
+              <button
+                type="submit"
+                disabled={isVerifying}
+                className="w-full bg-gradient-to-r from-indigo-500 to-fuchsia-500 hover:from-indigo-600 hover:to-fuchsia-600 disabled:opacity-50 px-6 py-3 rounded-xl text-sm font-bold text-white shadow-lg shadow-indigo-500/20 transition duration-150 hover:scale-[1.01]"
+              >
+                {isVerifying ? "Verifying..." : "Authenticate & Unlock"}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
       
       {/* 🌌 Premium Grid & Aurora Backgrounds */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f1f23_1px,transparent_1px),linear-gradient(to_bottom,#1f1f23_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] opacity-35 pointer-events-none" />
